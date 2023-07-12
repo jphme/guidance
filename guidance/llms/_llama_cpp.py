@@ -18,7 +18,7 @@ class LlamaCpp(LLM):
     """ A HuggingFace transformers language model with Guidance support.
     """
 
-    cache = LLM._open_cache("_llama_cpp.diskcache")
+    #cache = LLM._open_cache("_llama_cpp.diskcache")
 
     def __init__(self, model: str = "../ggml-model.q4_1.bin",
                  n_ctx: int = 2048,
@@ -39,8 +39,15 @@ class LlamaCpp(LLM):
                  include_role_in_end: bool = False,
                  before_role_end: str = "</",
                  after_role_end: str = ">",
-                 caching=True, token_healing=False, acceleration=False,
-                 temperature=0.25):
+                 caching=True, 
+                 token_healing=False, 
+                 acceleration=False,
+                 max_tokens= 1024,
+                 temperature=0.25,
+                 top_k=40,
+                 top_p=0.95,
+                 repeat_penalty=1.1,
+                 ):
         super().__init__()
 
         try:
@@ -63,7 +70,7 @@ class LlamaCpp(LLM):
             last_n_tokens_size=last_n_tokens_size,
             logits_all=logits_all,
             use_mmap=use_mmap,
-            verbose=verbose
+            verbose=verbose,
         )
         self.before_role = before_role
         self.after_role = after_role
@@ -82,6 +89,10 @@ class LlamaCpp(LLM):
         self.current_time = time.time()
         self.call_history = collections.deque()
         self.temperature = temperature
+        self.max_tokens= max_tokens,
+        self.top_k=top_k,
+        self.top_p=top_p,
+        self.repeat_penalty=repeat_penalty,
         self.token_healing = token_healing
         self.acceleration = acceleration
         if isinstance(tokenizer, str):
@@ -270,9 +281,9 @@ class LlamaCppSession(LLMSession):
     # def __call__(self, *args, **kwargs):
     #     return self.__call__(*args, **kwargs)
 
-    async def __call__(self, prompt, stop=None, stop_regex=None, temperature=None, n=1, max_tokens=1000, logprobs=None,
-                       top_p=1.0, echo=False, logit_bias=None, token_healing=None, pattern=None, stream=False,
-                       cache_seed=0, caching=None):
+    async def __call__(self, prompt, stop=None, stop_regex=None, temperature=None, n=1, max_tokens=None, logprobs=None,
+                       top_p=None, echo=False, logit_bias=None, token_healing=None, pattern=None, stream=False,
+                       cache_seed=0, caching=None, top_k=None, repeat_penalty=None):
         """ Generate a completion of the given prompt.
         """
 
@@ -281,9 +292,19 @@ class LlamaCppSession(LLMSession):
             temperature = self.llm.temperature
         if token_healing is None:
             token_healing = self.llm.token_healing
+        if max_tokens is None:
+            max_tokens = self.llm.max_tokens
+        if top_p is None:
+            top_p = self.llm.top_p
+        if top_k is None:
+            top_k = self.llm.top_k
+        if repeat_penalty is None:
+            repeat_penalty = self.llm.repeat_penalty
 
         # generate the cache key
-        key = self._cache_key(locals())
+        cache_params = self._cache_params(locals().copy())
+        llm_cache = self.llm.cache
+        key = llm_cache.create_key(self.llm.llm_name, **cache_params)
 
         # set the stop patterns
         if stop is not None:
